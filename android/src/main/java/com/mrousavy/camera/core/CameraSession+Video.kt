@@ -10,6 +10,8 @@ import androidx.camera.video.VideoRecordEvent
 import com.mrousavy.camera.core.extensions.getCameraError
 import com.mrousavy.camera.core.types.RecordVideoOptions
 import com.mrousavy.camera.core.types.Video
+import com.mrousavy.camera.react.RecordingStartEventModule
+import com.facebook.react.bridge.ReactApplicationContext
 
 @OptIn(ExperimentalPersistentRecording::class)
 @SuppressLint("MissingPermission", "RestrictedApi")
@@ -19,6 +21,9 @@ fun CameraSession.startRecording(
   callback: (video: Video) -> Unit,
   onError: (error: CameraError) -> Unit
 ) {
+  var hasEmittedFirstFrame = false
+  val reactContext = context as ReactApplicationContext
+  val firstFrameEmitter = RecordingStartEventModule(reactContext)
   if (camera == null) throw CameraNotReadyError()
   if (recording != null) throw RecordingInProgressError()
   val videoOutput = videoOutput ?: throw VideoNotEnabledError()
@@ -43,7 +48,21 @@ fun CameraSession.startRecording(
   isRecordingCanceled = false
   recording = pendingRecording.start(CameraQueues.cameraExecutor) { event ->
     when (event) {
-      is VideoRecordEvent.Start -> Log.i(CameraSession.TAG, "Recording started!")
+      is VideoRecordEvent.Start -> {
+        Log.i(CameraSession.TAG, "Recording started!")
+
+        if (!hasEmittedFirstFrame) {
+          hasEmittedFirstFrame = true
+
+          // high-res czas startu nagrania, w ns, monotoniczny
+          val firstFrameNs = System.nanoTime()
+
+          // wyślij do JS
+          firstFrameEmitter.sendFirstFrameTimestamp(firstFrameNs)
+
+          Log.i(CameraSession.TAG, "First frame timestamp (ns): $firstFrameNs sent to JS.")
+        }
+      }
 
       is VideoRecordEvent.Resume -> Log.i(CameraSession.TAG, "Recording resumed!")
 
