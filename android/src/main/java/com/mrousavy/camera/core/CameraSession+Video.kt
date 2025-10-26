@@ -11,7 +11,6 @@ import com.mrousavy.camera.core.extensions.getCameraError
 import com.mrousavy.camera.core.types.RecordVideoOptions
 import com.mrousavy.camera.core.types.Video
 import com.mrousavy.camera.react.RecordingStartEventModule
-import com.facebook.react.bridge.ReactApplicationContext
 
 @OptIn(ExperimentalPersistentRecording::class)
 @SuppressLint("MissingPermission", "RestrictedApi")
@@ -21,7 +20,9 @@ fun CameraSession.startRecording(
   callback: (video: Video) -> Unit,
   onError: (error: CameraError) -> Unit
 ) {
+  // pilnujemy żeby wysłać event tylko raz
   var hasEmittedFirstFrame = false
+
   if (camera == null) throw CameraNotReadyError()
   if (recording != null) throw RecordingInProgressError()
   val videoOutput = videoOutput ?: throw VideoNotEnabledError()
@@ -29,7 +30,10 @@ fun CameraSession.startRecording(
   // Create output video file
   val outputOptions = FileOutputOptions.Builder(options.file.file).also { outputOptions ->
     metadataProvider.location?.let { location ->
-      Log.i(CameraSession.TAG, "Setting Video Location to ${location.latitude}, ${location.longitude}...")
+      Log.i(
+        CameraSession.TAG,
+        "Setting Video Location to ${location.latitude}, ${location.longitude}..."
+      )
       outputOptions.setLocation(location)
     }
   }.build()
@@ -46,33 +50,41 @@ fun CameraSession.startRecording(
   isRecordingCanceled = false
   recording = pendingRecording.start(CameraQueues.cameraExecutor) { event ->
     when (event) {
-        is VideoRecordEvent.Start -> {
-          Log.i(CameraSession.TAG, "Recording started!")
+      is VideoRecordEvent.Start -> {
+        Log.i(CameraSession.TAG, "Recording started!")
 
-          if (!hasEmittedFirstFrame) {
-            hasEmittedFirstFrame = true
+        if (!hasEmittedFirstFrame) {
+          hasEmittedFirstFrame = true
 
-            val firstFrameNs = System.nanoTime()
+          val firstFrameNs = System.nanoTime()
 
-            // <-- to jest nowe:
-            com.mrousavy.camera.react.RecordingStartEventModule.emitFirstFrameTimestamp(
-              context,
-              firstFrameNs
-            )
+          // Wyślij timestamp pierwszej zakodowanej klatki do JS.
+          RecordingStartEventModule.emitFirstFrameTimestamp(
+            context,
+            firstFrameNs
+          )
 
-            Log.i(
-              CameraSession.TAG,
-              "First frame timestamp (ns): $firstFrameNs sent to JS."
-            )
-          }
+          Log.i(
+            CameraSession.TAG,
+            "First frame timestamp (ns): $firstFrameNs sent to JS."
+          )
         }
       }
 
-      is VideoRecordEvent.Resume -> Log.i(CameraSession.TAG, "Recording resumed!")
+      is VideoRecordEvent.Resume -> {
+        Log.i(CameraSession.TAG, "Recording resumed!")
+      }
 
-      is VideoRecordEvent.Pause -> Log.i(CameraSession.TAG, "Recording paused!")
+      is VideoRecordEvent.Pause -> {
+        Log.i(CameraSession.TAG, "Recording paused!")
+      }
 
-      is VideoRecordEvent.Status -> Log.i(CameraSession.TAG, "Status update! Recorded ${event.recordingStats.numBytesRecorded} bytes.")
+      is VideoRecordEvent.Status -> {
+        Log.i(
+          CameraSession.TAG,
+          "Status update! Recorded ${event.recordingStats.numBytesRecorded} bytes."
+        )
+      }
 
       is VideoRecordEvent.Finalize -> {
         if (isRecordingCanceled) {
@@ -90,9 +102,17 @@ fun CameraSession.startRecording(
         val error = event.getCameraError()
         if (error != null) {
           if (error.wasVideoRecorded) {
-            Log.e(CameraSession.TAG, "Video Recorder encountered an error, but the video was recorded anyways.", error)
+            Log.e(
+              CameraSession.TAG,
+              "Video Recorder encountered an error, but the video was recorded anyways.",
+              error
+            )
           } else {
-            Log.e(CameraSession.TAG, "Video Recorder encountered a fatal error!", error)
+            Log.e(
+              CameraSession.TAG,
+              "Video Recorder encountered a fatal error!",
+              error
+            )
             onError(error)
             return@start
           }
@@ -100,8 +120,14 @@ fun CameraSession.startRecording(
 
         // Prepare output result
         val durationMs = event.recordingStats.recordedDurationNanos / 1_000_000
-        Log.i(CameraSession.TAG, "Successfully completed video recording! Captured ${durationMs.toDouble() / 1_000.0} seconds.")
-        val path = event.outputResults.outputUri.path ?: throw UnknownRecorderError(false, null)
+        Log.i(
+          CameraSession.TAG,
+          "Successfully completed video recording! Captured ${durationMs.toDouble() / 1_000.0} seconds."
+        )
+
+        val path = event.outputResults.outputUri.path
+          ?: throw UnknownRecorderError(false, null)
+
         val size = videoOutput.attachedSurfaceResolution ?: Size(0, 0)
         val video = Video(path, durationMs, size)
         callback(video)
@@ -112,7 +138,6 @@ fun CameraSession.startRecording(
 
 fun CameraSession.stopRecording() {
   val recording = recording ?: throw NoRecordingInProgressError()
-
   recording.stop()
   this.recording = null
 }
